@@ -84,7 +84,7 @@ public class SubscriptionService {
         this.orderRepository = orderRepository;
     }
 
-    @Scheduled(initialDelay = 1000)
+    @Scheduled(fixedDelay = 120000)
     @Transactional
     public void checkForSubscriptionsWithControlledSku() {
 
