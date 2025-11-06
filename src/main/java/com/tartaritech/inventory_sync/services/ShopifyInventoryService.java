@@ -1,0 +1,389 @@
+package com.tartaritech.inventory_sync.services;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeoutException;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
+
+import java.time.Duration;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import reactor.util.retry.Retry;
+
+@Service
+public class ShopifyInventoryService {
+
+    private ShopifyGraphqlService shopifyGraphqlService;
+
+    private final Logger logger = LoggerFactory.getLogger(ShopifyInventoryService.class);
+
+    private final ObjectMapper objectMapper;
+
+    public ShopifyInventoryService(ShopifyGraphqlService shopifyGraphqlService, ObjectMapper objectMapper) {
+        this.shopifyGraphqlService = shopifyGraphqlService;
+        this.objectMapper = objectMapper;
+    }
+
+
+    public void decreaseAvaliable(String shopifyInventoryItemId, int delta) {
+
+        String rawInventoryId = shopifyInventoryItemId.substring(shopifyInventoryItemId.lastIndexOf("/") + 1);
+
+        String mutation = """
+                mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
+                        inventoryAdjustQuantities(input: $input) {
+                            userErrors {
+                                field
+                                message
+                            }
+                            inventoryAdjustmentGroup {
+                                createdAt
+                                reason
+                                referenceDocumentUri
+                                changes {
+                                name
+                                delta
+                                }
+                            }
+                        }
+                }
+                  """;
+
+        Map<String, Object> changes = new HashMap<>();
+        changes.put("delta", -delta);
+        changes.put("inventoryItemId", "gid://shopify/InventoryItem/" + rawInventoryId); // Usar GID completo direto
+        changes.put("locationId", "gid://shopify/Location/64095387781");
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("reason", "correction");
+        input.put("name", "available");
+        input.put("changes", List.of(changes));
+
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("input", input);
+
+        try {
+            JsonNode response = shopifyGraphqlService.executeMutation(mutation, variables).block();
+
+            // Verificar se há erros
+            if (response.has("inventoryAdjustQuantities")) {
+                JsonNode userErrors = response.get("inventoryAdjustQuantities").get("userErrors");
+                if (userErrors != null && userErrors.isArray() && userErrors.size() > 0) {
+                    throw new RuntimeException("Erro ao ajustar estoque: " + userErrors.toString());
+                }
+
+                JsonNode adjustmentGroup = response.get("inventoryAdjustQuantities").get("inventoryAdjustmentGroup");
+                if (adjustmentGroup != null) {
+                    System.out.println("Estoque ajustado com sucesso. Reference: " +
+                            adjustmentGroup.get("referenceDocumentUri").asText());
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Erro ao executar mutation de ajuste de estoque", e);
+        }
+    }
+
+    public String findVariantGidBySku(String sku) {
+
+        String query = """
+            query getProductBySku($sku: String!) {
+                products(first: 1, query: $sku) {
+                    edges {
+                        node {
+                            id
+                            variants(first: 250) {
+                                edges {
+                                    node {
+                                        id
+                                        sku
+                                        inventoryItem {
+                                            id
+                                        }
+                                    }
+                        
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        """;
+        
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("sku", "sku:" + sku);
+        
+        try {
+            JsonNode response = shopifyGraphqlService.executeQuery(query, variables)
+                .timeout(Duration.ofSeconds(30))
+                .retryWhen(Retry.backoff(2, Duration.ofSeconds(1))
+                    .filter(throwable -> throwable instanceof TimeoutException 
+                        || (throwable instanceof WebClientRequestException 
+                            && throwable.getCause() instanceof java.io.IOException)))
+                .block();
+            
+            if (response.has("products")) {
+                JsonNode products = response.get("products");
+                JsonNode edges = products.get("edges");
+                
+                if (edges.isArray() && edges.size() > 0) {
+                    JsonNode firstProduct = edges.get(0).get("node");
+                    JsonNode variants = firstProduct.get("variants").get("edges");
+                    
+                    // Buscar variant com o SKU específico
+                    for (JsonNode variantEdge : variants) {
+                        JsonNode variant = variantEdge.get("node");
+                        String variantSku = variant.get("sku").asText();
+                        
+                        if (sku.equals(variantSku)) {
+                            // Retornar o GID completo do GraphQL ID
+                            JsonNode inventoryItem = variant.get("inventoryItem");
+                            if (inventoryItem != null && inventoryItem.has("id")) {
+                                logger.info("SHOPIFY INVENTORY ITEM ID: {}", inventoryItem.get("id").asText());
+                                return inventoryItem.get("id").asText();
+                            }
+                        }
+                    }
+                }
+            }
+            
+            throw new RuntimeException("Variante com SKU '" + sku + "' não encontrada");
+            
+        } catch (Exception e) {
+            throw new RuntimeException("Erro ao buscar variante por SKU: " + sku, e);
+        }
+    }
+
+    public int getCurrentReservedQuantity(String shopifyInventoryItemId) {
+        String rawInventoryId = shopifyInventoryItemId.substring(shopifyInventoryItemId.lastIndexOf("/") + 1);
+        
+        String query = """
+            query getInventoryItem($id: ID!) {
+                inventoryItem(id: $id) {
+                    id
+                    inventoryLevels(first: 10) {
+                        edges {
+                            node {
+                                location {
+                                    id
+                                }
+                                quantities(names: ["available", "committed", "on_hand", "reserved"]) {
+                                    name
+                                    quantity
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        """;
+        
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("id", "gid://shopify/InventoryItem/" + rawInventoryId);
+        
+        try {
+            JsonNode response = shopifyGraphqlService.executeQuery(query, variables).block();
+            
+            if (response.has("inventoryItem")) {
+                JsonNode inventoryItem = response.get("inventoryItem");
+                if (inventoryItem != null && inventoryItem.has("inventoryLevels")) {
+                    JsonNode inventoryLevels = inventoryItem.get("inventoryLevels");
+                    JsonNode edges = inventoryLevels.get("edges");
+                    
+                    if (edges.isArray()) {
+                        for (JsonNode edge : edges) {
+                            JsonNode node = edge.get("node");
+                            String locationId = node.get("location").get("id").asText();
+                            
+                            // Verificar se é a localização correta
+                            if ("gid://shopify/Location/64095387781".equals(locationId)) {
+                                JsonNode quantities = node.get("quantities");
+                                int available = 0, committed = 0, onHand = 0, reserved = 0;
+                                
+                                // Parse quantities array
+                                if (quantities.isArray()) {
+                                    logger.info("Array the quantidades {}",objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(quantities));
+                                    for (JsonNode quantity : quantities) {
+                                        String name = quantity.get("name").asText();
+                                        int value = quantity.get("quantity").asInt();
+                                        
+                                        switch (name) {
+                                            case "available" -> available = value;
+                                            case "committed" -> committed = value;
+                                            case "on_hand" -> onHand = value;
+                                            case "reserved" -> reserved = value;
+                                        }
+                                    }
+                                }
+                                
+                                logger.info("Quantidade atual de reserved: {} (onHand: {}, available: {}, committed: {}) para inventory item: {}", 
+                                        reserved, onHand, available, committed, shopifyInventoryItemId);
+                                return reserved;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            logger.warn("Não foi possível encontrar a quantidade de reserved para inventory item: {}", shopifyInventoryItemId);
+            return 0;
+            
+        } catch (Exception e) {
+            logger.error("Erro ao buscar quantidade de reserved para inventory item: {}", shopifyInventoryItemId, e);
+            throw new RuntimeException("Erro ao buscar quantidade de reserved", e);
+        }
+    }
+
+    public void increaseReserved(String inventoryItemId, int amount) {
+        adjustReservedInventory(inventoryItemId, amount, "increment");
+    }
+
+    public void decreaseReserved(String inventoryItemId, int amount) {
+        adjustReservedInventory(inventoryItemId, -amount, "decrement");
+    }
+
+    public void resetReserved(String inventoryItemId) {
+        int currentReserved = getCurrentReservedQuantity(inventoryItemId);
+        
+            logger.info("Zerando estoque reserved. Quantidade atual: {}, decrementando: {}", currentReserved, currentReserved);
+            adjustReservedInventory(inventoryItemId, -currentReserved, "reset");
+            adjustAvailableInventory(inventoryItemId, currentReserved, "reset");
+   
+    }
+
+    public void adjustAvailableInventory(String shopifyInventoryItemId, int delta, String operation) {
+
+        String rawInventoryId = shopifyInventoryItemId.substring(shopifyInventoryItemId.lastIndexOf("/") + 1);
+
+        String mutation = """
+                mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
+                        inventoryAdjustQuantities(input: $input) {
+                            userErrors {
+                                field
+                                message
+                            }
+                            inventoryAdjustmentGroup {
+                                createdAt
+                                reason
+                                referenceDocumentUri
+                                changes {
+                                    name
+                                    delta
+                                }
+                            }
+                        }
+                }
+                  """;
+
+        Map<String, Object> changes = new HashMap<>();
+        changes.put("delta", delta);
+        changes.put("inventoryItemId", "gid://shopify/InventoryItem/" + rawInventoryId);
+        changes.put("locationId", "gid://shopify/Location/64095387781");
+       
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("reason", "correction");
+        input.put("name", "available");
+        // input.put("referenceDocumentUri",
+        //         "gid://inventory-sync-app/ManualAdjustment/" + System.currentTimeMillis() + "-" + operation);
+        input.put("changes", List.of(changes));
+
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("input", input);
+
+        try {
+            JsonNode response = shopifyGraphqlService.executeMutation(mutation, variables)
+                    .timeout(Duration.ofSeconds(30))
+                    .retryWhen(Retry.backoff(2, Duration.ofSeconds(1))
+                            .filter(throwable -> throwable instanceof java.util.concurrent.TimeoutException 
+                                || (throwable instanceof org.springframework.web.reactive.function.client.WebClientRequestException 
+                                    && throwable.getCause() instanceof java.io.IOException)))
+                    .block();
+
+            // Verificar se há erros
+            if (response.has("inventoryAdjustQuantities")) {
+                JsonNode userErrors = response.get("inventoryAdjustQuantities").get("userErrors");
+                if (userErrors != null && userErrors.isArray() && userErrors.size() > 0) {
+                    throw new RuntimeException("Erro ao ajustar estoque available: " + userErrors.toString());
+                }
+
+                JsonNode adjustmentGroup = response.get("inventoryAdjustQuantities").get("inventoryAdjustmentGroup");
+                if (adjustmentGroup != null) {
+                    JsonNode referenceUri = adjustmentGroup.get("referenceDocumentUri");
+                    String reference = (referenceUri != null) ? referenceUri.asText() : "N/A";
+                    logger.info("Estoque available ajustado com sucesso. Operation: {}, Delta: {}, Reference: {}",
+                            operation, delta, reference);
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Erro ao executar mutation de ajuste de estoque available", e);
+        }
+    }
+
+    public void adjustReservedInventory(String shopifyInventoryItemId, int delta, String operation) {
+
+        String rawInventoryId = shopifyInventoryItemId.substring(shopifyInventoryItemId.lastIndexOf("/") + 1);
+        
+        String mutation = """
+                mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
+                        inventoryAdjustQuantities(input: $input) {
+                            userErrors {
+                                field
+                                message
+                            }
+                            inventoryAdjustmentGroup {
+                                createdAt
+                                reason
+                                referenceDocumentUri
+                                changes {
+                                    name
+                                    delta
+                                }
+                            }
+                        }
+                }
+                  """;
+
+        Map<String, Object> changes = new HashMap<>();
+        changes.put("delta", delta);
+        changes.put("inventoryItemId", "gid://shopify/InventoryItem/" + rawInventoryId);
+        changes.put("locationId", "gid://shopify/Location/64095387781");
+        changes.put("ledgerDocumentUri", "gid://inventory-sync-app/Ledger/" + System.currentTimeMillis() + "-" + operation);
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("reason", "correction");
+        input.put("name", "reserved");
+        input.put("referenceDocumentUri", "gid://inventory-sync-app/ManualAdjustment/" + System.currentTimeMillis() + "-" + operation);
+        input.put("changes", List.of(changes));
+
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("input", input);
+
+        try {
+            JsonNode response = shopifyGraphqlService.executeMutation(mutation, variables).block();
+
+            // Verificar se há erros
+            if (response.has("inventoryAdjustQuantities")) {
+                JsonNode userErrors = response.get("inventoryAdjustQuantities").get("userErrors");
+                if (userErrors != null && userErrors.isArray() && userErrors.size() > 0) {
+                    throw new RuntimeException("Erro ao ajustar estoque reserved: " + userErrors.toString());
+                }
+
+                JsonNode adjustmentGroup = response.get("inventoryAdjustQuantities").get("inventoryAdjustmentGroup");
+                if (adjustmentGroup != null) {
+                    JsonNode referenceUri = adjustmentGroup.get("referenceDocumentUri");
+                    String reference = (referenceUri != null) ? referenceUri.asText() : "N/A";
+                    logger.info("Estoque reserved ajustado com sucesso. Operation: {}, Delta: {}, Reference: {}", 
+                            operation, delta, reference);
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Erro ao executar mutation de ajuste de estoque reserved", e);
+        }
+    }
+
+}

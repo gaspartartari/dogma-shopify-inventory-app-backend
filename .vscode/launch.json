@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot-InventorySyncApplication<inventory-sync>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.tartaritech.inventory_sync.InventorySyncApplication",
+            "projectName": "inventory-sync",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}

@@ -1,0 +1,87 @@
+{"properties": [
+  {
+    "name": "cors.origins",
+    "type": "java.lang.String",
+    "description": "A description for 'cors.origins'"
+  },
+  {
+    "name": "security.jwt.duration",
+    "type": "java.lang.String",
+    "description": "A description for 'security.jwt.duration'"
+  },
+  {
+    "name": "security.client-secret",
+    "type": "java.lang.String",
+    "description": "A description for 'security.client-secret'"
+  },
+  {
+    "name": "security.client-id",
+    "type": "java.lang.String",
+    "description": "A description for 'security.client-id'"
+  },
+  {
+    "name": "pagbrasil.secret",
+    "type": "java.lang.String",
+    "description": "A description for 'pagbrasil.secret'"
+  },
+  {
+    "name": "webhook.job.batch.size",
+    "type": "java.lang.String",
+    "description": "A description for 'webhook.job.batch.size'"
+  },
+  {
+    "name": "webhook.idempotency.ttl.hours",
+    "type": "java.lang.String",
+    "description": "A description for 'webhook.idempotency.ttl.hours'"
+  },
+  {
+    "name": "webhook.job.max.attempts",
+    "type": "java.lang.String",
+    "description": "A description for 'webhook.job.max.attempts'"
+  },
+  {
+    "name": "webhook.idempotency.cleanup.strategy",
+    "type": "java.lang.String",
+    "description": "A description for 'webhook.idempotency.cleanup.strategy'"
+  },
+  {
+    "name": "webhook.job.processing.interval",
+    "type": "java.lang.String",
+    "description": "A description for 'webhook.job.processing.interval'"
+  },
+  {
+    "name": "pagbrasil.url",
+    "type": "java.lang.String",
+    "description": "A description for 'pagbrasil.url'"
+  },
+  {
+    "name": "pagbrasil.token",
+    "type": "java.lang.String",
+    "description": "A description for 'pagbrasil.token'"
+  },
+  {
+    "name": "shopify.store.url",
+    "type": "java.lang.String",
+    "description": "A description for 'shopify.store.url'"
+  },
+  {
+    "name": "pagbrasil.api.delay",
+    "type": "java.lang.String",
+    "description": "A description for 'pagbrasil.api.delay'"
+  },
+  {
+    "name": "shopify.api.version",
+    "type": "java.lang.String",
+    "description": "A description for 'shopify.api.version'"
+  },
+  {
+    "name": "shopify.api.token",
+    "type": "java.lang.String",
+    "description": "A description for 'shopify.api.token'"
+  },
+  {
+    "name": "pagbrasil.hmac.key",
+    "type": "java.lang.String",
+    "description": "A description for 'pagbrasil.hmac.key'"
+  }
+]}

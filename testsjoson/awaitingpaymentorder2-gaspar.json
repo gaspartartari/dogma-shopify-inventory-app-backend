@@ -1,0 +1,71 @@
+{
+    "secret": "f0c2f6335da61194901d41246ec8c",
+    "subscription": "P175952281691",
+    "status": 2,
+    "billing_cycle": "Mensal",
+    "amount_brl": "99.00",
+    "number_recurrences": 1,
+    "limit": 0,
+    "next_billing_date": "2025-10-20",
+    "cancellation_date": "2025-11-14",
+    "customer_email": "gaspartartari@gmail.com",
+    "customer_name": "gaspar",
+    "customer_phone": "51993415860",
+    "recurrences": [
+        {
+            "order": "REC_1",
+            "number_recurrence": 1,
+            "skipped": 0,
+            "payment_method": null,
+            "order_status": null,
+            "link": null,
+            "amount_brl": null,
+            "amount_original": null,
+            "payment_date": null,
+            "customer_email": null,
+            "products": [
+                {
+                    "sku": "6600_41368920588421",
+                    "unit_price": "99.00",
+                    "quantity": 1,
+                    "discount": "0.00",
+                    "amount_total": "99.00",
+                    "category": "Geral"
+                }
+            ]
+        },
+        {
+            "order": null,
+            "number_recurrence": 2,
+            "skipped": 0,
+            "payment_method": null,
+            "order_status": null,
+            "link": null,
+            "amount_brl": null,
+            "amount_original": null,
+            "payment_date": null,
+            "customer_email": null,
+            "products": [
+                {
+                    "sku": "6600_41368920588421",
+                    "unit_price": "99.00",
+                    "quantity": 1,
+                    "discount": "0.00",
+                    "amount_total": "99.00",
+                    "category": "Geral"
+                }
+            ]
+        }
+    ],
+    "products": [
+        {
+            "sku": "6600_41368920588421",
+            "unit_price": "99.00",
+            "quantity": 1,
+            "discount": "0.00",
+            "amount_total": "99.00",
+            "category": "Geral"
+        }
+    ],
+    "signature": "3e2ee61fc48883c29dabeae37482294f"
+}
