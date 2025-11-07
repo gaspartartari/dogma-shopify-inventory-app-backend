@@ -108,7 +108,13 @@ public class PagBrasilService {
                     .bodyToMono(SubscriptionDTO.class)
                     .timeout(Duration.ofSeconds(30))
                     .retryWhen(Retry.backoff(3, Duration.ofSeconds(2))
-                            .maxBackoff(Duration.ofSeconds(5)))
+                            .maxBackoff(Duration.ofSeconds(5))
+                            .doBeforeRetry(signal -> {
+                                logger.warn("Tentativa {} falhou ao buscar subscription {}: {}. Retentando...",
+                                        signal.totalRetries() + 1,
+                                        subscriptionShort.getSubscription(),
+                                        signal.failure().getMessage());
+                            }))
                     .block();
 
             if (dto != null) {
@@ -117,11 +123,14 @@ public class PagBrasilService {
             }
 
         } catch (Exception e) {
-            logger.error("Erro ao buscar subscription por id {}: {}", subscriptionShort.getSubscription(),
-                    e.getMessage());
+            logger.error("Erro ao buscar subscription por id {}: {} - Tipo: {}", 
+                    subscriptionShort.getSubscription(),
+                    e.getMessage(),
+                    e.getClass().getSimpleName(),
+                    e);
         }
 
-        logger.warn("Subscription não encontrada: {}", subscriptionShort.getSubscription());
+        logger.warn("Subscription não encontrada ou erro ao buscar: {}", subscriptionShort.getSubscription());
         return null;
     }
 }

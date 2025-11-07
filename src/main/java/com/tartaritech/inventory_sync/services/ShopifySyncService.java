@@ -29,15 +29,17 @@ public class ShopifySyncService {
     @Scheduled(fixedDelay = 30000)
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void processPendingShopifyOperations() {
+        logger.debug("ShopifySyncService: Checking for pending Shopify operations...");
+        
         List<ShopifySyncOperation> pendingOps = shopifySyncOperationRepository
             .findByStatusAndRetryCountLessThan("PENDING", 3);
         
         if (pendingOps.isEmpty()) {
-            logger.debug("No pending Shopify operations found");
+            logger.debug("ShopifySyncService: No pending Shopify operations found");
             return;
         }
         
-        logger.info("Processing {} pending Shopify operations", pendingOps.size());
+        logger.info("ShopifySyncService: Processing {} pending Shopify operations", pendingOps.size());
         
         for (ShopifySyncOperation op : pendingOps) {
             try {
@@ -66,21 +68,30 @@ public class ShopifySyncService {
     }
 
     private void executeShopifyOperation(ShopifySyncOperation op) {
+        logger.info("Executing Shopify operation: {} for SKU: {} (subscription: {})", 
+                    op.getOperation(), op.getSku(), op.getSubscriptionId());
 
         Integer reservedInventory = prepareReservedInventory(op);
         Integer availableInventory = prepareAvailableInventory(op);
 
+        logger.debug("Calculated inventory adjustments - Reserved: {}, Available: {}", 
+                     reservedInventory, availableInventory);
+
         String[] arr = op.getSku().split("_");
         String shopifySku = arr[0];
         
+        logger.debug("Looking up Shopify variant for SKU: {}", shopifySku);
         String shopifyGid = shopifyInventoryService.findVariantGidBySku(shopifySku);
         
         if (shopifyGid == null) {
+            logger.error("Shopify variant not found for SKU: {}", shopifySku);
             throw new RuntimeException("Shopify variant not found for SKU: " + shopifySku);
         }
         
+        logger.info("Found Shopify variant: {} - Adjusting inventory", shopifyGid);
         shopifyInventoryService.adjustReservedInventory(shopifyGid, reservedInventory, op.getOperation());
         shopifyInventoryService.adjustAvailableInventory(shopifyGid, availableInventory, op.getOperation());
+        logger.info("Successfully adjusted Shopify inventory for SKU: {}", shopifySku);
     }
 
     private Integer prepareReservedInventory(ShopifySyncOperation op) {
