@@ -193,6 +193,12 @@ public class SubscriptionService {
             operations.addAll(calculateDelta(r.getProducts(), updatedItems, entity));
             updateNextItems(updatedItems, r.getProducts());
 
+            Optional<OrderDTO> orderDTO = dto.getOrders().stream().filter(o -> o.getNumberRecurrence() == r.getNumberRecurrence()).findFirst();
+            if (orderDTO.isPresent()) {
+                mapOrderDtoToEntity(orderDTO.get(), r);
+
+            }
+
         });
 
         Subscription updatedEntity = mapDtoToEntity(dto, entity);
@@ -202,6 +208,12 @@ public class SubscriptionService {
         // Save Shopify sync operations
         shopifySyncOperationRepository.saveAll(operations);
 
+    }
+
+    public void mapOrderDtoToEntity (OrderDTO dto, Order entity) {
+        entity.setOrderRec(dto.getOrder() != null ? dto.getOrder() : null);
+        entity.setPaymentDate(dto.getPaymentDate() != null ? dto.getPaymentDate(): null);
+        orderRepository.save(entity);
     }
 
     private void createOrdersWithControlledItems(Subscription entity, OrderDTO dto) {
