@@ -60,8 +60,8 @@ public class SubscriptionService {
 
     private final Logger logger = LoggerFactory.getLogger(SubscriptionService.class);
 
-    @Value("${pagbrasil.api.delay:500}")
-    private int apiCallDelay;
+    @Value("${pagbrasil.request.delay:200}")
+    private int requestDelayMs;
 
     @Value("${revenue.cache.parallel.batch.size:20}")
     private int parallelBatchSize;
@@ -84,7 +84,7 @@ public class SubscriptionService {
         this.orderRepository = orderRepository;
     }
 
-    @Scheduled(fixedDelay = 120000)
+    @Scheduled(fixedDelay = 300000)
     @Transactional
     public void checkForSubscriptionsWithControlledSku() {
 
@@ -196,7 +196,6 @@ public class SubscriptionService {
             Optional<OrderDTO> orderDTO = dto.getOrders().stream().filter(o -> o.getNumberRecurrence() == r.getNumberRecurrence()).findFirst();
             if (orderDTO.isPresent()) {
                 mapOrderDtoToEntity(orderDTO.get(), r);
-
             }
 
         });
@@ -530,6 +529,7 @@ public class SubscriptionService {
     private List<SubscriptionDTO> findSubscriptionsWithControlledSkus(List<SubscriptionShortDTO> idList) {
 
         return Flux.fromIterable(idList)
+                .delayElements(Duration.ofMillis(requestDelayMs)) // Configurable delay between requests to avoid rate limiting
                 .flatMap(shortDto -> Mono.fromCallable(() -> {
                     try {
                         SubscriptionDTO dto = pagBrasilService.fetchSubscriptionById(shortDto);
@@ -554,7 +554,7 @@ public class SubscriptionService {
                             shortDto.getSubscription());
                     return Mono.empty();
                 }),
-                parallelBatchSize // Concurrency limit
+                parallelBatchSize // Concurrency limit (default: 5)
                 )
                 .filter(dto -> dto != null)
                 .collectList()
@@ -564,6 +564,7 @@ public class SubscriptionService {
 
     private List<SubscriptionDTO> finAllSubscriptionsWithoutControlledSku(List<SubscriptionShortDTO> idList) {
         return Flux.fromIterable(idList)
+                .delayElements(Duration.ofMillis(requestDelayMs)) // Configurable delay between requests to avoid rate limiting
                 .flatMap(shortDto -> Mono.fromCallable(() -> {
                     try {
                         SubscriptionDTO dto = pagBrasilService.fetchSubscriptionById(shortDto);
@@ -588,7 +589,7 @@ public class SubscriptionService {
                                     shortDto.getSubscription());
                             return Mono.empty();
                         }),
-                        parallelBatchSize // Concurrency limit
+                        parallelBatchSize // Concurrency limit (default: 5)
                 )
                 .filter(dto -> dto != null)
                 .collectList()

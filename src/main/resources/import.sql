@@ -25,5 +25,7 @@ INSERT INTO tb_role (id, authority) VALUES (2, 'ROLE_OPERATOR');
 
 -- password: admin (BCrypt)
 INSERT INTO tb_user (email, password) VALUES( 'gaspar@tartari.com', '$2a$10$k0qK5Rnu8mGN09KrCRNRHOaI3VkvenhNnt7iXPERNumfDY/uTinoi');
+INSERT INTO tb_user (email, password) VALUES( 'lojavirtual@cervejariadogma.com.br ', '$2a$10$GsXkevlwMvEbxegWJqAPIOXVgOzqqHLbGWA.aG3118s6UFiGIU5q2');
 
 INSERT INTO tb_user_role (user_id, role_id) VALUES (1, 1);
+INSERT INTO tb_user_role (user_id, role_id) VALUES (2, 1);

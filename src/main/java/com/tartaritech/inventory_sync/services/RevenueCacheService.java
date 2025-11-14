@@ -48,6 +48,12 @@ public class RevenueCacheService {
     
     @Value("${revenue.cache.enabled:true}")
     private boolean cacheEnabled;
+    
+    @Value("${pagbrasil.request.delay:200}")
+    private int requestDelayMs;
+    
+    @Value("${pagbrasil.status.delay:500}")
+    private int statusDelayMs;
 
     public RevenueCacheService(PagBrasilService pagBrasilService,
                                ControlledSkuRepository controlledSkuRepository,
@@ -60,7 +66,7 @@ public class RevenueCacheService {
     /**
      * Scheduled job that runs every hour to refresh revenue cache
      */
-    @Scheduled(cron = "${revenue.cache.schedule.cron:0 0 * * * *}")
+    @Scheduled(cron = "${revenue.cache.schedule.cron:0 0 2 * * *}")
     // @Scheduled(initialDelay = 100000)
     @Transactional
     public void scheduledRefreshCache() {
@@ -138,6 +144,14 @@ public class RevenueCacheService {
                     allSubscriptions.addAll(result.getSubscriptions());
                     logger.debug("Status {}: found {} subscriptions", status, count);
                 }
+                
+                // Add delay between status queries to avoid rate limiting
+                if (!status.equals("6")) { // Don't delay after last status
+                    Thread.sleep(statusDelayMs);
+                }
+            } catch (InterruptedException e) {
+                logger.warn("Delay interrupted while fetching status {}", status);
+                Thread.currentThread().interrupt();
             } catch (Exception e) {
                 logger.error("Error fetching subscriptions for status {}: {}", status, e.getMessage());
             }
@@ -151,6 +165,7 @@ public class RevenueCacheService {
      */
     private List<SubscriptionDTO> fetchSubscriptionDetailsInParallel(List<SubscriptionShortDTO> subscriptionIds) {
         return Flux.fromIterable(subscriptionIds)
+            .delayElements(Duration.ofMillis(requestDelayMs)) // Configurable delay between requests to avoid rate limiting
             .flatMap(shortDto -> 
                 Mono.fromCallable(() -> {
                     try {
@@ -167,7 +182,7 @@ public class RevenueCacheService {
                         shortDto.getSubscription());
                     return Mono.empty();
                 }),
-                parallelBatchSize // Concurrency limit
+                parallelBatchSize // Concurrency limit (default: 5)
             )
             .filter(dto -> dto != null)
             .collectList()
