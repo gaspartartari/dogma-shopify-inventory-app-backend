@@ -206,16 +206,10 @@ public class AuthorizationServerConfig {
 		String[] origins = corsOrigins.split(",");
 		
 		CorsConfiguration corsConfig = new CorsConfiguration();
-		// Use setAllowedOrigins (não patterns) quando allowCredentials é true
-		corsConfig.setAllowedOrigins(List.of(origins));
-		// Adicione OPTIONS explicitamente para preflight requests
-		corsConfig.setAllowedMethods(List.of("POST", "GET", "PUT", "DELETE", "PATCH", "OPTIONS"));
+		corsConfig.setAllowedOriginPatterns(List.of(origins));
+		corsConfig.setAllowedMethods(List.of("POST", "GET", "PUT", "DELETE", "PATCH"));
 		corsConfig.setAllowCredentials(true);
-		// Headers mais completos para preflight
-		corsConfig.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin"));
-		corsConfig.setExposedHeaders(List.of("Authorization"));
-		// Cache do preflight por 1 hora
-		corsConfig.setMaxAge(3600L);
+		corsConfig.setAllowedHeaders(List.of("Authorization", "Content-Type"));
 		
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
 		source.registerCorsConfiguration("/oauth2/**", corsConfig);
