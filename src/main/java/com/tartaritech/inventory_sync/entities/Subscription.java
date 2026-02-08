@@ -3,9 +3,7 @@ package com.tartaritech.inventory_sync.entities;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import com.tartaritech.inventory_sync.enums.SubscriptionStatus;
 
@@ -41,10 +39,34 @@ public class Subscription {
     @Enumerated(EnumType.STRING)
     private SubscriptionStatus status;
 
-    private int numberRecurrences;
-    private int nextRecurrence;
+    @Column(name = "billing_cycle")
+    private String billingCycle;
+
+    @Column(name = "shipping_cycle")
+    private String shippingCycle;
+
+    @Column(name = "amount_brl")
+    private String amountBrl;
+
+    private Integer numberRecurrences;
+    
+    @Column(name = "\"limit\"")
+    private Integer limit;
+
+    @Column(name = "next_billing_date")
     private LocalDate nextBillingDate;
+
+    @Column(name = "cancellation_date")
     private LocalDate cancellationDate;
+
+    @Column(name = "effective_cancellation_date")
+    private LocalDate effectiveCancellationDate;
+
+    @Column(name = "order_token")
+    private String orderToken;
+
+    @Column(name = "pix_rec_id")
+    private String pixRecId;
 
     @OneToMany(mappedBy = "subscription")
     private List<Order> recurrences = new ArrayList<>();

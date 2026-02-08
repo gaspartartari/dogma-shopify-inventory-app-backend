@@ -8,6 +8,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
 import jakarta.persistence.GeneratedValue;
@@ -35,9 +36,36 @@ public class Order {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "order_rec")
     private String orderRec;
-    private int numberRecurrence;
+    
+    @Column(name = "number_recurrence")
+    private Integer numberRecurrence;
+    
+    private Integer skipped;
+    
+    @Column(name = "payment_method")
+    private String paymentMethod;
+    
+    @Column(name = "order_status")
+    private String orderStatus;
+    
+    private String link;
+    
+    @Column(name = "amount_brl")
+    private String amountBrl;
+    
+    @Column(name = "amount_original")
+    private String amountOriginal;
+    
+    @Column(name = "payment_date")
     private String paymentDate;
+    
+    @Column(name = "customer_email")
+    private String customerEmail;
+
+    @Column(name = "stock_released", nullable = false)
+    private Boolean stockReleased = false;
 
     @CreatedDate
     private LocalDateTime createdDate;

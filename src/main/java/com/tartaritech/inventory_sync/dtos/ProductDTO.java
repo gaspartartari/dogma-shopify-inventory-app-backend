@@ -20,21 +20,25 @@ public class ProductDTO {
     
     private Long id;
     private String sku;
-    private int quantity;
+    private Integer quantity;
     private String order;
     
     @JsonProperty("unit_price")
     private String unitPrice;
     
     @JsonProperty("amount_total")
-    private String totalPrice;
+    private String amountTotal;
+    
+    private String discount;
+    
+    private String category;
     
     public ProductDTO(Product entity) {
         this.id = entity.getId();
         this.sku = entity.getControlledSku().getSku();
         this.quantity = entity.getQuantity();
-        this.order = entity.getOrder().getOrderRec();
+        this.order = entity.getOrder() != null ? entity.getOrder().getOrderRec() : null;
         this.unitPrice = entity.getUnitPrice() != null ? entity.getUnitPrice().toString() : null;
-        this.totalPrice = entity.getTotalPrice() != null ? entity.getTotalPrice().toString() : null;
+        this.amountTotal = entity.getTotalPrice() != null ? entity.getTotalPrice().toString() : null;
     }
 }

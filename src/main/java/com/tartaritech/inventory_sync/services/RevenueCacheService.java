@@ -19,17 +19,14 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.tartaritech.inventory_sync.dtos.OrderDTO;
 import com.tartaritech.inventory_sync.dtos.ProductDTO;
-import com.tartaritech.inventory_sync.dtos.SubscriptionDTO;
+import com.tartaritech.inventory_sync.dtos.RecurrenceDTO;
+import com.tartaritech.inventory_sync.dtos.SubscriptionFullDTO;
 import com.tartaritech.inventory_sync.dtos.SubscriptionShortDTO;
 import com.tartaritech.inventory_sync.dtos.SubscriptionsDTO;
 import com.tartaritech.inventory_sync.entities.RevenueCache;
 import com.tartaritech.inventory_sync.repositories.ControlledSkuRepository;
 import com.tartaritech.inventory_sync.repositories.RevenueCacheRepository;
-
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 @Service
 public class RevenueCacheService {
@@ -43,16 +40,13 @@ public class RevenueCacheService {
     private static final DateTimeFormatter INPUT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter OUTPUT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM");
     
-    @Value("${revenue.cache.parallel.batch.size:20}")
-    private int parallelBatchSize;
-    
     @Value("${revenue.cache.enabled:true}")
     private boolean cacheEnabled;
     
-    @Value("${pagbrasil.request.delay:200}")
+    @Value("${pagbrasil.request.delay:2000}")
     private int requestDelayMs;
     
-    @Value("${pagbrasil.status.delay:500}")
+    @Value("${pagbrasil.status.delay:2000}")
     private int statusDelayMs;
 
     public RevenueCacheService(PagBrasilService pagBrasilService,
@@ -67,7 +61,7 @@ public class RevenueCacheService {
      * Scheduled job that runs every hour to refresh revenue cache
      */
     @Scheduled(cron = "${revenue.cache.schedule.cron:0 0 2 * * *}")
-    // @Scheduled(initialDelay = 100000)
+    // @Scheduled(initialDelay = 500000) // 5 minutes
     @Transactional
     public void scheduledRefreshCache() {
         if (!cacheEnabled) {
@@ -85,6 +79,17 @@ public class RevenueCacheService {
      */
     @Transactional
     public void refreshRevenueCache() {
+        try {
+            if (!pagBrasilService.tryAcquireApiLockWithTimeout(30)) {
+                logger.warn("PagBrasil API lock not available after 30s wait. Skipping cache refresh.");
+                return;
+            }
+        } catch (InterruptedException e) {
+            logger.warn("Interrupted while waiting for PagBrasil API lock. Skipping cache refresh.");
+            Thread.currentThread().interrupt();
+            return;
+        }
+
         Instant startTime = Instant.now();
         logger.info("=== Starting Revenue Cache Refresh ===");
         
@@ -99,9 +104,9 @@ public class RevenueCacheService {
                 return;
             }
             
-            // Step 2: Fetch full subscription details in parallel batches
-            logger.info("Step 2: Fetching full subscription details (batch size: {})", parallelBatchSize);
-            List<SubscriptionDTO> fullSubscriptions = fetchSubscriptionDetailsInParallel(allSubscriptionIds);
+            // Step 2: Fetch full subscription details sequentially
+            logger.info("Step 2: Fetching full subscription details sequentially");
+            List<SubscriptionFullDTO> fullSubscriptions = fetchSubscriptionDetailsInParallel(allSubscriptionIds);
             logger.info("Successfully fetched {} full subscription details", fullSubscriptions.size());
             
             // Step 3: Calculate revenue by month
@@ -122,6 +127,8 @@ public class RevenueCacheService {
         } catch (Exception e) {
             logger.error("Error during revenue cache refresh", e);
             logger.warn("Cache refresh failed. Previous cache data will be retained.");
+        } finally {
+            pagBrasilService.releaseApiLock();
         }
     }
 
@@ -145,9 +152,9 @@ public class RevenueCacheService {
                     logger.debug("Status {}: found {} subscriptions", status, count);
                 }
                 
-                // Add delay between status queries to avoid rate limiting
+                // Add delay between status queries to avoid rate limiting (with jitter)
                 if (!status.equals("6")) { // Don't delay after last status
-                    Thread.sleep(statusDelayMs);
+                    Thread.sleep((long) (statusDelayMs * (0.5 + Math.random() * 0.5)));
                 }
             } catch (InterruptedException e) {
                 logger.warn("Delay interrupted while fetching status {}", status);
@@ -161,66 +168,77 @@ public class RevenueCacheService {
     }
 
     /**
-     * Fetch full subscription details in parallel batches using WebFlux
+     * Fetch full subscription details sequentially with rate limiting
      */
-    private List<SubscriptionDTO> fetchSubscriptionDetailsInParallel(List<SubscriptionShortDTO> subscriptionIds) {
-        return Flux.fromIterable(subscriptionIds)
-            .delayElements(Duration.ofMillis(requestDelayMs)) // Configurable delay between requests to avoid rate limiting
-            .flatMap(shortDto -> 
-                Mono.fromCallable(() -> {
-                    try {
-                        return pagBrasilService.fetchSubscriptionById(shortDto);
-                    } catch (Exception e) {
-                        logger.warn("Failed to fetch subscription {}: {}", 
-                            shortDto.getSubscription(), e.getMessage());
-                        return null;
-                    }
-                })
-                .timeout(Duration.ofSeconds(30))
-                .onErrorResume(e -> {
-                    logger.warn("Timeout or error fetching subscription {}", 
+    private List<SubscriptionFullDTO> fetchSubscriptionDetailsInParallel(List<SubscriptionShortDTO> subscriptionIds) {
+        List<SubscriptionFullDTO> results = new ArrayList<>();
+        
+        logger.info("Fetching {} subscription details sequentially with {}ms delay between requests", 
+                subscriptionIds.size(), requestDelayMs);
+        
+        for (int i = 0; i < subscriptionIds.size(); i++) {
+            SubscriptionShortDTO shortDto = subscriptionIds.get(i);
+            
+            try {
+                SubscriptionFullDTO dto = pagBrasilService.fetchSubscriptionById(shortDto);
+                if (dto != null) {
+                    results.add(dto);
+                }
+                
+                // Add delay between requests to avoid rate limiting (with jitter: 50-100% of delay)
+                if (i < subscriptionIds.size() - 1) {
+                    long jitter = (long) (requestDelayMs * (0.5 + Math.random() * 0.5));
+                    Thread.sleep(jitter);
+                }
+            } catch (InterruptedException e) {
+                logger.warn("Delay interrupted while fetching subscription {}", 
                         shortDto.getSubscription());
-                    return Mono.empty();
-                }),
-                parallelBatchSize // Concurrency limit (default: 5)
-            )
-            .filter(dto -> dto != null)
-            .collectList()
-            .block();
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                logger.warn("Failed to fetch subscription {}: {}", 
+                        shortDto.getSubscription(), e.getMessage());
+                // Continue with next subscription instead of failing entire batch
+            }
+        }
+        
+        logger.info("Successfully fetched {} out of {} subscription details", 
+                results.size(), subscriptionIds.size());
+        return results;
     }
 
     /**
      * Calculate revenue by month from all subscriptions
      * Only includes paid orders with controlled SKUs
      */
-    private Map<String, BigDecimal> calculateRevenueByMonth(List<SubscriptionDTO> subscriptions) {
+    private Map<String, BigDecimal> calculateRevenueByMonth(List<SubscriptionFullDTO> subscriptions) {
         Map<String, BigDecimal> revenueByMonth = new HashMap<>();
         
         int totalOrders = 0;
         int paidOrders = 0;
         int ordersWithControlledSkus = 0;
         
-        for (SubscriptionDTO subscription : subscriptions) {
-            if (subscription.getOrders() == null || subscription.getOrders().isEmpty()) {
+        for (SubscriptionFullDTO subscription : subscriptions) {
+            if (subscription.getRecurrences() == null || subscription.getRecurrences().isEmpty()) {
                 continue;
             }
             
-            // Iterate through ALL orders (don't call processOrders() which filters)
-            for (OrderDTO order : subscription.getOrders()) {
+            // Iterate through ALL recurrences
+            for (RecurrenceDTO recurrence : subscription.getRecurrences()) {
                 totalOrders++;
                 
-                // Skip orders without payment date (not paid yet)
-                if (order.getPaymentDate() == null || order.getPaymentDate().trim().isEmpty()) {
+                // Skip recurrences without payment date (not paid yet)
+                if (recurrence.getPaymentDate() == null || recurrence.getPaymentDate().trim().isEmpty()) {
                     continue;
                 }
                 
                 paidOrders++;
                 
                 // Parse payment date
-                LocalDate paymentDate = parsePaymentDate(order.getPaymentDate());
+                LocalDate paymentDate = parsePaymentDate(recurrence.getPaymentDate());
                 if (paymentDate == null) {
                     logger.debug("Could not parse payment date for order {}: {}", 
-                        order.getOrder(), order.getPaymentDate());
+                        recurrence.getOrder(), recurrence.getPaymentDate());
                     continue;
                 }
                 
@@ -231,14 +249,14 @@ public class RevenueCacheService {
                 BigDecimal orderRevenue = BigDecimal.ZERO;
                 boolean hasControlledSku = false;
                 
-                if (order.getProducts() != null) {
-                    for (ProductDTO product : order.getProducts()) {
+                if (recurrence.getProducts() != null) {
+                    for (ProductDTO product : recurrence.getProducts()) {
                         // Check if this is a controlled SKU
                         if (product.getSku() != null && controlledSkuRepository.existsById(product.getSku())) {
                             hasControlledSku = true;
                             
                             // Parse total price (comes as String from API)
-                            BigDecimal productPrice = parseTotalPrice(product.getTotalPrice());
+                            BigDecimal productPrice = parseTotalPrice(product.getAmountTotal());
                             if (productPrice != null) {
                                 orderRevenue = orderRevenue.add(productPrice);
                             }
