@@ -68,7 +68,7 @@ public class SubscriptionDTO {
                 this.numberRecurrences = entity.getNumberRecurrences();
                 this.nextBillingDate = entity.getNextBillingDate() != null ? entity.getNextBillingDate() : null;
                 this.cancellationDate = entity.getCancellationDate() != null ? entity.getCancellationDate() : null;
-                this.nextRecurrence = entity.getNextRecurrence();
+                this.nextRecurrence = 0; // Field removed from entity, defaulting to 0
 
                 this.orders = !entity.getRecurrences().isEmpty() ? entity.getRecurrences().stream().map(OrderDTO::new).collect(Collectors.toSet()) : null;
 

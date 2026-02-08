@@ -1,12 +1,8 @@
 package com.tartaritech.inventory_sync.dtos;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.stream.Collectors;
-
-import javax.swing.text.DateFormatter;
 
 import com.tartaritech.inventory_sync.entities.Order;
 
@@ -26,6 +22,7 @@ public class OrderWithDetailsDTO {
     private int numberRecurrence;
     private String paymentDate;
     private String updatedDate;
+    private Boolean stockReleased;
     
     // Customer info
     private String customerName;
@@ -49,6 +46,7 @@ public class OrderWithDetailsDTO {
         this.orderNumber = entity.getOrderRec();
         this.numberRecurrence = entity.getNumberRecurrence();
         this.paymentDate = entity.getPaymentDate();
+        this.stockReleased = entity.getStockReleased();
         this.updatedDate = entity.getLastModifiedDate() != null 
             ? entity.getLastModifiedDate().format(formatter) 
             : null;

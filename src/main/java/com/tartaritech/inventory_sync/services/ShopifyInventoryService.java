@@ -3,17 +3,13 @@ package com.tartaritech.inventory_sync.services;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeoutException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClientRequestException;
 
-import java.time.Duration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import reactor.util.retry.Retry;
 
 @Service
 public class ShopifyInventoryService {
@@ -56,7 +52,7 @@ public class ShopifyInventoryService {
 
         Map<String, Object> changes = new HashMap<>();
         changes.put("delta", -delta);
-        changes.put("inventoryItemId", "gid://shopify/InventoryItem/" + rawInventoryId); // Usar GID completo direto
+        changes.put("inventoryItemId", "gid://shopify/InventoryItem/" + rawInventoryId);
         changes.put("locationId", "gid://shopify/Location/64095387781");
 
         Map<String, Object> input = new HashMap<>();
@@ -68,7 +64,7 @@ public class ShopifyInventoryService {
         variables.put("input", input);
 
         try {
-            JsonNode response = shopifyGraphqlService.executeMutation(mutation, variables).block();
+            JsonNode response = shopifyGraphqlService.executeMutation(mutation, variables);
 
             // Verificar se há erros
             if (response.has("inventoryAdjustQuantities")) {
@@ -117,45 +113,58 @@ public class ShopifyInventoryService {
         Map<String, Object> variables = new HashMap<>();
         variables.put("sku", "sku:" + sku);
         
-        try {
-            JsonNode response = shopifyGraphqlService.executeQuery(query, variables)
-                .timeout(Duration.ofSeconds(30))
-                .retryWhen(Retry.backoff(2, Duration.ofSeconds(1))
-                    .filter(throwable -> throwable instanceof TimeoutException 
-                        || (throwable instanceof WebClientRequestException 
-                            && throwable.getCause() instanceof java.io.IOException)))
-                .block();
-            
-            if (response.has("products")) {
-                JsonNode products = response.get("products");
-                JsonNode edges = products.get("edges");
+        int maxRetries = 2;
+        long backoffMs = 1000;
+        
+        for (int attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                JsonNode response = shopifyGraphqlService.executeQuery(query, variables);
                 
-                if (edges.isArray() && edges.size() > 0) {
-                    JsonNode firstProduct = edges.get(0).get("node");
-                    JsonNode variants = firstProduct.get("variants").get("edges");
+                if (response.has("products")) {
+                    JsonNode products = response.get("products");
+                    JsonNode edges = products.get("edges");
                     
-                    // Buscar variant com o SKU específico
-                    for (JsonNode variantEdge : variants) {
-                        JsonNode variant = variantEdge.get("node");
-                        String variantSku = variant.get("sku").asText();
+                    if (edges.isArray() && edges.size() > 0) {
+                        JsonNode firstProduct = edges.get(0).get("node");
+                        JsonNode variants = firstProduct.get("variants").get("edges");
                         
-                        if (sku.equals(variantSku)) {
-                            // Retornar o GID completo do GraphQL ID
-                            JsonNode inventoryItem = variant.get("inventoryItem");
-                            if (inventoryItem != null && inventoryItem.has("id")) {
-                                logger.info("SHOPIFY INVENTORY ITEM ID: {}", inventoryItem.get("id").asText());
-                                return inventoryItem.get("id").asText();
+                        // Buscar variant com o SKU específico
+                        for (JsonNode variantEdge : variants) {
+                            JsonNode variant = variantEdge.get("node");
+                            String variantSku = variant.get("sku").asText();
+                            
+                            if (sku.equals(variantSku)) {
+                                // Retornar o GID completo do GraphQL ID
+                                JsonNode inventoryItem = variant.get("inventoryItem");
+                                if (inventoryItem != null && inventoryItem.has("id")) {
+                                    logger.info("SHOPIFY INVENTORY ITEM ID: {}", inventoryItem.get("id").asText());
+                                    return inventoryItem.get("id").asText();
+                                }
                             }
                         }
                     }
                 }
+                
+                throw new RuntimeException("Variante com SKU '" + sku + "' não encontrada");
+                
+            } catch (Exception e) {
+                if (attempt < maxRetries - 1 && (e instanceof java.net.http.HttpTimeoutException 
+                        || (e.getCause() instanceof java.io.IOException))) {
+                    logger.warn("Erro ao buscar variante por SKU: {}. Tentativa {}/{}. Retentando...", 
+                            sku, attempt + 1, maxRetries);
+                    try {
+                        Thread.sleep(backoffMs * (attempt + 1));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                } else {
+                    throw new RuntimeException("Erro ao buscar variante por SKU: " + sku, e);
+                }
             }
-            
-            throw new RuntimeException("Variante com SKU '" + sku + "' não encontrada");
-            
-        } catch (Exception e) {
-            throw new RuntimeException("Erro ao buscar variante por SKU: " + sku, e);
         }
+        
+        throw new RuntimeException("Erro ao buscar variante por SKU: " + sku + " após " + maxRetries + " tentativas");
     }
 
     public int getCurrentReservedQuantity(String shopifyInventoryItemId) {
@@ -186,7 +195,7 @@ public class ShopifyInventoryService {
         variables.put("id", "gid://shopify/InventoryItem/" + rawInventoryId);
         
         try {
-            JsonNode response = shopifyGraphqlService.executeQuery(query, variables).block();
+            JsonNode response = shopifyGraphqlService.executeQuery(query, variables);
             
             if (response.has("inventoryItem")) {
                 JsonNode inventoryItem = response.get("inventoryItem");
@@ -288,39 +297,50 @@ public class ShopifyInventoryService {
         Map<String, Object> input = new HashMap<>();
         input.put("reason", "correction");
         input.put("name", "available");
-        // input.put("referenceDocumentUri",
-        //         "gid://inventory-sync-app/ManualAdjustment/" + System.currentTimeMillis() + "-" + operation);
         input.put("changes", List.of(changes));
 
         Map<String, Object> variables = new HashMap<>();
         variables.put("input", input);
 
-        try {
-            JsonNode response = shopifyGraphqlService.executeMutation(mutation, variables)
-                    .timeout(Duration.ofSeconds(30))
-                    .retryWhen(Retry.backoff(2, Duration.ofSeconds(1))
-                            .filter(throwable -> throwable instanceof java.util.concurrent.TimeoutException 
-                                || (throwable instanceof org.springframework.web.reactive.function.client.WebClientRequestException 
-                                    && throwable.getCause() instanceof java.io.IOException)))
-                    .block();
+        int maxRetries = 2;
+        long backoffMs = 1000;
+        
+        for (int attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                JsonNode response = shopifyGraphqlService.executeMutation(mutation, variables);
 
-            // Verificar se há erros
-            if (response.has("inventoryAdjustQuantities")) {
-                JsonNode userErrors = response.get("inventoryAdjustQuantities").get("userErrors");
-                if (userErrors != null && userErrors.isArray() && userErrors.size() > 0) {
-                    throw new RuntimeException("Erro ao ajustar estoque available: " + userErrors.toString());
+                // Verificar se há erros
+                if (response.has("inventoryAdjustQuantities")) {
+                    JsonNode userErrors = response.get("inventoryAdjustQuantities").get("userErrors");
+                    if (userErrors != null && userErrors.isArray() && userErrors.size() > 0) {
+                        throw new RuntimeException("Erro ao ajustar estoque available: " + userErrors.toString());
+                    }
+
+                    JsonNode adjustmentGroup = response.get("inventoryAdjustQuantities").get("inventoryAdjustmentGroup");
+                    if (adjustmentGroup != null) {
+                        JsonNode referenceUri = adjustmentGroup.get("referenceDocumentUri");
+                        String reference = (referenceUri != null) ? referenceUri.asText() : "N/A";
+                        logger.info("Estoque available ajustado com sucesso. Operation: {}, Delta: {}, Reference: {}",
+                                operation, delta, reference);
+                    }
                 }
-
-                JsonNode adjustmentGroup = response.get("inventoryAdjustQuantities").get("inventoryAdjustmentGroup");
-                if (adjustmentGroup != null) {
-                    JsonNode referenceUri = adjustmentGroup.get("referenceDocumentUri");
-                    String reference = (referenceUri != null) ? referenceUri.asText() : "N/A";
-                    logger.info("Estoque available ajustado com sucesso. Operation: {}, Delta: {}, Reference: {}",
-                            operation, delta, reference);
+                return; // Success, exit retry loop
+                
+            } catch (Exception e) {
+                if (attempt < maxRetries - 1 && (e instanceof java.net.http.HttpTimeoutException 
+                        || (e.getCause() instanceof java.io.IOException))) {
+                    logger.warn("Erro ao executar mutation de ajuste de estoque available. Tentativa {}/{}. Retentando...", 
+                            attempt + 1, maxRetries);
+                    try {
+                        Thread.sleep(backoffMs * (attempt + 1));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                } else {
+                    throw new RuntimeException("Erro ao executar mutation de ajuste de estoque available", e);
                 }
             }
-        } catch (Exception e) {
-            throw new RuntimeException("Erro ao executar mutation de ajuste de estoque available", e);
         }
     }
 
@@ -364,7 +384,7 @@ public class ShopifyInventoryService {
         variables.put("input", input);
 
         try {
-            JsonNode response = shopifyGraphqlService.executeMutation(mutation, variables).block();
+            JsonNode response = shopifyGraphqlService.executeMutation(mutation, variables);
 
             // Verificar se há erros
             if (response.has("inventoryAdjustQuantities")) {

@@ -32,11 +32,15 @@ public class Product{
     @JoinColumn(name = "sku")
     private ControlledSKu controlledSku;
 
-    private int quantity;
+    private Integer quantity;
 
     private BigDecimal unitPrice;
 
     private BigDecimal totalPrice;
+    
+    private String discount;
+    
+    private String category;
 
     @ManyToOne
     @JoinColumn(name = "order_id")
